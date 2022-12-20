@@ -56,9 +56,21 @@
 #include "task.h"
 #include <stdbool.h>
 #include "semphr.h"
+#include "event_groups.h"
+
 
 /* === Definicion y Macros ================================================= */
+#define BOTON_PROBAR_APRETADO (1<<0)
+#define BOTON_PROBAR_LIBRE    (1<<4)
 
+#define BOTON_PRENDER_APRETADO (1<<1)
+#define BOTON_PRENDER_LIBRE    (1<<5)
+
+#define BOTON_APAGAR_APRETADO (1<<2)
+#define BOTON_APAGAR_LIBRE    (1<<6)
+
+#define BOTON_CAMBIAR_APRETADO (1<<3)
+#define BOTON_CAMBIAR_LIBRE    (1<<7)
 /* === Declaraciones de tipos de datos internos ============================ */
 typedef struct parametros_s {
     digital_output_t led;
@@ -66,30 +78,103 @@ typedef struct parametros_s {
     digital_input_t tecla;   
 } * parametros_t;
 
+EventGroupHandle_t eventos_teclas;
 
 /* === Declaraciones de funciones internas ================================= */
 
-/* === Definiciones de variables internas ================================== */
+void Azul(void * parameters){
+    board_t board = parameters;
+    EventBits_t eventos;
+    while(true){
+        eventos = xEventGroupWaitBits(eventos_teclas, BOTON_PROBAR_APRETADO | BOTON_PROBAR_LIBRE, pdTRUE,pdFALSE, portMAX_DELAY);
+        if(eventos & BOTON_PROBAR_APRETADO){
+            DigitalOutputActivate(board->led_azul);
+        }
 
-static board_t board;
-static SemaphoreHandle_t mutex;
-/* === Definiciones de variables externas ================================== */
+        if(eventos & BOTON_PROBAR_LIBRE){
+            DigitalOutputDeactivate(board->led_azul);
+        }
+    }
+}
 
-/* === Definiciones de funciones internas ================================== */
+void Amarilla(void * parameters){
+    board_t board = parameters;
+    while(true){
+        if (xEventGroupWaitBits(eventos_teclas, BOTON_CAMBIAR_APRETADO, pdTRUE,pdFALSE, portMAX_DELAY)) {
+                DigitalOutputToggle(board->led_amarillo);
+            }
+    }
+}
 
-void Blinking(void * parameters) {
-    parametros_t parametros = (parametros_t) parameters;
-    while (true) {
-        xSemaphoreTake(mutex, portMAX_DELAY);
-        DigitalOutputActivate(parametros->led);
-        vTaskDelay(pdMS_TO_TICKS(parametros->periodo));
-        DigitalOutputDeactivate(parametros->led);
-        xSemaphoreGive(mutex);
-        vTaskDelay(pdMS_TO_TICKS(parametros->periodo));
+void Roja(void * parameters){
+    board_t board = parameters;
+    while(true){
+        if (xEventGroupWaitBits(eventos_teclas, BOTON_PRENDER_APRETADO, pdTRUE,pdFALSE, portMAX_DELAY)) {
+                DigitalOutputActivate(board->led_rojo);
+            }
+        if (xEventGroupWaitBits(eventos_teclas, BOTON_APAGAR_APRETADO, pdTRUE,pdFALSE, portMAX_DELAY)) {
+                DigitalOutputDeactivate(board->led_rojo);
+            }
+    }
+}
+
+void Verde(void * parameters){
+    board_t board = parameters;
+    while(true){
+        DigitalOutputToggle(board->led_verde);
+        vTaskDelay(pdMS_TO_TICKS(5*150));
+    }
+}
+
+
+
+
+void Teclado(void * parameters){
+    
+
+    board_t board = parameters;
+    
+    while (true) { 
+            
+            if (DigitalInputHasActivated(board->boton_cambiar)) {
+                xEventGroupSetBits(eventos_teclas,BOTON_CAMBIAR_APRETADO);
+            }else if(DigitalInputHasDeactivated(board->boton_cambiar)){
+                xEventGroupSetBits(eventos_teclas,BOTON_CAMBIAR_LIBRE);
+            }
+
+            if (DigitalInputHasActivated(board->boton_apagar)) {
+                xEventGroupSetBits(eventos_teclas,BOTON_APAGAR_APRETADO);
+
+            }else if(DigitalInputHasDeactivated(board->boton_apagar)){
+                xEventGroupSetBits(eventos_teclas,BOTON_APAGAR_LIBRE);
+
+            }
+
+            if (DigitalInputHasActivated(board->boton_prender)) {
+                xEventGroupSetBits(eventos_teclas,BOTON_PRENDER_APRETADO);
+
+            }else if(DigitalInputHasDeactivated(board->boton_prender)){
+                xEventGroupSetBits(eventos_teclas,BOTON_PRENDER_LIBRE);               
+            }
+
+            if (DigitalInputHasActivated(board->boton_prueba)) {
+                xEventGroupSetBits(eventos_teclas,BOTON_PROBAR_APRETADO);
+            }else if(DigitalInputHasDeactivated(board->boton_prueba)){
+                xEventGroupSetBits(eventos_teclas,BOTON_PROBAR_LIBRE);                
+            }         
+            
+            vTaskDelay(pdMS_TO_TICKS(150));
         
     }
 }
 
+
+
+/* === Definiciones de variables internas ================================== */
+
+/* === Definiciones de variables externas ================================== */
+
+/* === Definiciones de funciones internas ================================== */
 
 
 /* === Definiciones de funciones externas ================================== */
@@ -102,23 +187,18 @@ void Blinking(void * parameters) {
  **          El valor de retorno 0 es para evitar un error en el compilador.
  */
 int main(void) {
-    static struct parametros_s parametros[3];
 
     /* Inicializaciones y configuraciones de dispositivos */
-    board = BoardCreate();
+    board_t board = BoardCreate(); 
+
+    eventos_teclas = xEventGroupCreate();
     
-
-    parametros[0].led = board-> led_rojo;
-    parametros[0].periodo = 500;
-
-    parametros[1].led = board-> led_azul;
-    parametros[1].periodo = 500;    
-
-    mutex = xSemaphoreCreateMutex();
     /* Creación de las tareas */
-    xTaskCreate(Blinking, "Rojo", configMINIMAL_STACK_SIZE, &parametros[0], tskIDLE_PRIORITY + 1, NULL);
-    xTaskCreate(Blinking, "Azul", configMINIMAL_STACK_SIZE, &parametros[1], tskIDLE_PRIORITY + 2, NULL);
-    
+     xTaskCreate(Teclado, "Teclado", configMINIMAL_STACK_SIZE, (void *)board, tskIDLE_PRIORITY + 1, NULL);
+     xTaskCreate(Azul, "Azul", configMINIMAL_STACK_SIZE, (void *)board, tskIDLE_PRIORITY + 1, NULL);
+     xTaskCreate(Amarilla, "Amarilla", configMINIMAL_STACK_SIZE, (void *)board, tskIDLE_PRIORITY + 1, NULL);
+     xTaskCreate(Roja, "Verde", configMINIMAL_STACK_SIZE, (void *)board, tskIDLE_PRIORITY + 1, NULL);
+     xTaskCreate(Verde, "Roja", configMINIMAL_STACK_SIZE, (void *)board, tskIDLE_PRIORITY + 1, NULL);
 
     /* Arranque del sistema operativo */
     vTaskStartScheduler();
